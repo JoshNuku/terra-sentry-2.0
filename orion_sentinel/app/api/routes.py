@@ -299,7 +299,7 @@ def manual_mic_alert(req: ManualMicAlertRequest = Body(...)):
 
         time.sleep(0.08)
 
-    # Use global preferred stream URL resolver (LAN when NGROK_ENABLED=false)
+    # Use global preferred stream URL resolver (LAN when TUNNEL_PROVIDER=none)
     stream_url = stream_service.get_preferred_stream_url()
 
     # 3) If AI confirms threat, send a second confirmation alert
@@ -434,13 +434,13 @@ def dashboard_stream_stop(deviceId: str, request: Request):
         stopped = False
         for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
             try:
-                if proc.info['name'] and 'ngrok' in proc.info['name']:
+                if proc.info['name'] and 'cloudflared' in proc.info['name']:
                     proc.terminate()
                     stopped = True
             except Exception:
                 continue
-        log.info(f"[Dashboard] Stream stop requested for {deviceId}. Ngrok stopped: {stopped}")
-        return {"success": True, "ngrokStopped": stopped}
+        log.info(f"[Dashboard] Stream stop requested for {deviceId}. Cloudflared stopped: {stopped}")
+        return {"success": True, "cloudflaredStopped": stopped}
     except Exception as e:
         log.error(f"dashboard_stream_stop error: {e}")
         return {"success": False, "error": str(e)}

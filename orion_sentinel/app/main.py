@@ -66,14 +66,14 @@ def start_background_threads():
 
 
 
-def delayed_ngrok_and_registration():
+def delayed_tunnel_and_registration():
     time.sleep(5)  # Wait 5 seconds to ensure FastAPI is listening
     log.info("Registering device with backend...")
     try:
         from app.services import stream_service, heartbeat_service
         location = get_location()
         battery_level = heartbeat_service.get_battery_level() if hasattr(heartbeat_service, "get_battery_level") else 100
-        # Resolve preferred stream URL globally (LAN IP when NGROK_ENABLED=false).
+        # Resolve preferred stream URL globally (LAN IP when TUNNEL_PROVIDER=none).
         stream_url = stream_service.get_preferred_stream_url()
         if not stream_url:
             log.error("Failed to resolve stream URL for registration.")
@@ -93,4 +93,4 @@ def delayed_ngrok_and_registration():
 def on_startup():
     log.info("Starting background threads...")
     start_background_threads()
-    threading.Thread(target=delayed_ngrok_and_registration, daemon=True).start()
+    threading.Thread(target=delayed_tunnel_and_registration, daemon=True).start()
