@@ -1,10 +1,21 @@
-
 import os
-# Path to COCO classes file
-COCO_CLASSES_PATH = os.getenv("COCO_CLASSES_PATH", os.path.join(os.path.dirname(__file__), "../../models/coco_classes.txt"))
+
+# Paths configuration with auto-discovery of best.onnx and coco.names
+_models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../models"))
+_best_onnx = os.path.join(_models_dir, "best.onnx")
+_default_tflite = os.path.join(_models_dir, "yolov5n.tflite")
+_coco_names = os.path.join(_models_dir, "coco.names")
+_coco_classes = os.path.join(_models_dir, "coco_classes.txt")
+
+# Path to COCO classes file (prefer coco.names if present)
+COCO_CLASSES_PATH = os.getenv(
+    "COCO_CLASSES_PATH",
+    _coco_names if os.path.exists(_coco_names) else _coco_classes
+)
 
 # Allowed classes for backend alerts
 ALLOWED_CLASSES = ["excavator", "bus", "car", "motorcycle", "truck", "person"]
+
 # --- Hardware/Model Parameters ---
 # Audio
 SAMPLE_RATE = int(os.getenv("AUDIO_SAMPLE_RATE", "16000"))
@@ -14,8 +25,12 @@ MAX9814_ADC_CHANNEL = int(os.getenv("MAX9814_ADC_CHANNEL", "1"))  # A1
 # Vision
 YOLO_INPUT_SIZE = int(os.getenv("YOLO_INPUT_SIZE", "320"))
 YOLO_CLASSES = ["excavator", "bus", "car", "motorcycle", "truck", "person"]
-YOLO_TFLITE_PATH = os.getenv("YOLO_TFLITE_PATH", os.path.join(os.path.dirname(__file__), "../../models/yolov5n.tflite"))
 
+# Dynamic Model Path selection (prefer best.onnx if present)
+YOLO_TFLITE_PATH = os.getenv(
+    "YOLO_TFLITE_PATH",
+    _best_onnx if os.path.exists(_best_onnx) else _default_tflite
+)
 
 
 # AI verification window settings (multi-frame vote)

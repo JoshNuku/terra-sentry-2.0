@@ -22,18 +22,33 @@ _input_details = None
 _output_details = None
 _input_width = None
 _input_height = None
+_net = None
+_model_type = None  # "onnx" or "tflite"
 
 def _load_model():
-    global _interpreter, _input_details, _output_details, _input_width, _input_height
-    if _interpreter is None:
+    global _interpreter, _input_details, _output_details, _input_width, _input_height, _net, _model_type
+    if _model_type is not None:
+        return
+
+    ext = os.path.splitext(MODEL_PATH)[1].lower()
+    if ext == ".onnx":
+        log.info(f"[VISION] Loading ONNX model from {MODEL_PATH} via OpenCV DNN...")
+        _net = cv2.dnn.readNet(MODEL_PATH)
+        _net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+        _net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+        _model_type = "onnx"
+        _input_height = INPUT_SIZE
+        _input_width = INPUT_SIZE
+    else:
+        log.info(f"[VISION] Loading TFLite model from {MODEL_PATH} via tflite_runtime...")
         _interpreter = tflite.Interpreter(model_path=MODEL_PATH, num_threads=2)
         _interpreter.allocate_tensors()
         _input_details = _interpreter.get_input_details()
         _output_details = _interpreter.get_output_details()
-        # Prefer model-declared shape (NHWC: [1, H, W, C]) over static config.
         shape = _input_details[0]["shape"]
         _input_height = int(shape[1])
         _input_width = int(shape[2])
+        _model_type = "tflite"
 
 def detect(frame):
     result = detect_detailed(frame)
@@ -47,25 +62,35 @@ def detect(frame):
 def detect_detailed(frame):
     try:
         _load_model()
-        # 1. Resize
         input_w = _input_width or INPUT_SIZE
         input_h = _input_height or INPUT_SIZE
-        frame_resized = cv2.resize(frame, (input_w, input_h))
-        # 2. BGR -> RGB
-        frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
-        # 3. Normalize
-        input_data = frame_rgb.astype(np.float32) / 255.0
-        # 4. Add batch dim
-        input_data = np.expand_dims(input_data, axis=0)
-        # 5. Quantize if needed
-        scale, zero_point = _input_details[0]['quantization']
-        if scale > 0:
-            input_data = (input_data / scale + zero_point).astype(np.uint8)
-        _interpreter.set_tensor(_input_details[0]['index'], input_data)
-        _interpreter.invoke()
-        output = _interpreter.get_tensor(_output_details[0]['index'])
-        # Output: [1, 25200, 85]
-        detections = output[0]
+
+        if _model_type == "onnx":
+            # ONNX inference using OpenCV DNN
+            blob = cv2.dnn.blobFromImage(frame, 1/255.0, (input_w, input_h), swapRB=True, crop=False)
+            _net.setInput(blob)
+            outputs = _net.forward()
+            
+            # outputs shape is typically [1, 25200, 85] or [1, 85, 25200]
+            if outputs.shape[1] == 85 and outputs.shape[2] == 25200:
+                outputs = np.transpose(outputs, (0, 2, 1))
+            elif outputs.ndim == 3 and outputs.shape[2] != len(COCO_CLASSES) + 5 and outputs.shape[1] == len(COCO_CLASSES) + 5:
+                outputs = np.transpose(outputs, (0, 2, 1))
+            
+            detections = outputs[0]
+        else:
+            # TFLite inference
+            frame_resized = cv2.resize(frame, (input_w, input_h))
+            frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+            input_data = frame_rgb.astype(np.float32) / 255.0
+            input_data = np.expand_dims(input_data, axis=0)
+            scale, zero_point = _input_details[0]['quantization']
+            if scale > 0:
+                input_data = (input_data / scale + zero_point).astype(np.uint8)
+            _interpreter.set_tensor(_input_details[0]['index'], input_data)
+            _interpreter.invoke()
+            output = _interpreter.get_tensor(_output_details[0]['index'])
+            detections = output[0]
         boxes = detections[:, :4]
         objectness = detections[:, 4]
         class_scores = detections[:, 5:]
