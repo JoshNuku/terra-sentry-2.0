@@ -8,9 +8,19 @@ from app.services import detection_service, heartbeat_service
 
 log = logger.get_logger()
 
+from fastapi.middleware.cors import CORSMiddleware
 from app.core import config
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(routes.router)
 
 # Shared state for location
