@@ -22,7 +22,7 @@ def audio_loop():
     sleep_interval = 1.0 / float(target_rate)
     buffer_size = max(256, int(target_rate * BUFFER_SECONDS))
     last_trigger = 0
-    min_trigger_interval = 5  # seconds
+    min_trigger_interval = 15  # seconds
     status_log_interval = 60  # seconds
     last_status_log = 0
     windows_processed = 0
@@ -54,7 +54,7 @@ def audio_loop():
             label, confidence = audio_model.classify(audio_np, sample_rate=recent_effective_hz)
             now = time.time()
             windows_processed += 1
-            if label and confidence > 0.7 and (now - last_trigger) > min_trigger_interval:
+            if label and confidence > 0.70 and (now - last_trigger) > min_trigger_interval:
                 event = {
                     "type": "AUDIO_TRIGGER",
                     "label": label,
