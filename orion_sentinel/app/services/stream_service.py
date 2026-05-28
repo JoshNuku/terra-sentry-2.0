@@ -15,6 +15,17 @@ _registered_stream_url = None  # The URL registered with backend during startup
 def start_cloudflare_tunnel(port):
     import sys
     import re
+    
+    # Active cleanup of any orphaned cloudflared processes to prevent port conflicts or duplicate tunnels
+    try:
+        log.info("[CLOUDFLARE] Cleaning up any existing cloudflared instances...")
+        if sys.platform.startswith("win"):
+            subprocess.run(["taskkill", "/F", "/IM", "cloudflared.exe"], capture_output=True)
+        else:
+            subprocess.run(["pkill", "-f", "cloudflared"], capture_output=True)
+    except Exception as e:
+        log.warning(f"[CLOUDFLARE] Cleanup of existing cloudflared instances failed: {e}")
+
     cmd = ["cloudflared", "tunnel", "--url", f"http://127.0.0.1:{port}"]
     if sys.platform.startswith("win"):
         cmd[0] = "cloudflared.exe"

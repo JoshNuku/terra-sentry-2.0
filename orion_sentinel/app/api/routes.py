@@ -222,10 +222,19 @@ def stream_keepalive():
 def control_restart(deviceId: Optional[str] = None):
     import threading
     import os
+    import sys
+    import subprocess
     
     def delayed_exit():
         time.sleep(1.0)
-        logger.get_logger().info("Restart requested: Exiting process now...")
+        logger.get_logger().info("Restart requested: Cleaning up cloudflared and exiting process now...")
+        try:
+            if sys.platform.startswith("win"):
+                subprocess.run(["taskkill", "/F", "/IM", "cloudflared.exe"], capture_output=True)
+            else:
+                subprocess.run(["pkill", "-f", "cloudflared"], capture_output=True)
+        except Exception:
+            pass
         os._exit(0)
         
     threading.Thread(target=delayed_exit).start()
