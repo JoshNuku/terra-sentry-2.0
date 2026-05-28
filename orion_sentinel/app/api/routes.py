@@ -9,12 +9,41 @@ from pydantic import BaseModel
 from typing import Optional
 from app.services import stream_service, alert_service
 from app.services.alert_service import VALID_TRIGGER_TYPES, VALID_THREAT_TYPES
-from app.sensors.camera_singleton import picam2
+from app.sensors import camera_singleton
 from app.ai import vision
 from app.core import logger, config
 
 # === Router ===
 router = APIRouter()
+
+
+def camera_available():
+    return camera_singleton.picam2 is not None
+
+
+def ensure_camera_started():
+    camera = camera_singleton.picam2
+    if camera is None:
+        return False
+    try:
+        if getattr(camera, "started", None) is False:
+            camera.start()
+        return True
+    except Exception as e:
+        logger.get_logger().error(f"Camera start failed: {e}")
+        camera_singleton.picam2 = None
+        return False
+
+
+def capture_camera_frame():
+    if not ensure_camera_started():
+        return None
+    try:
+        return camera_singleton.picam2.capture_array()
+    except Exception as e:
+        logger.get_logger().error(f"Camera capture failed: {e}")
+        camera_singleton.picam2 = None
+        return None
 
 # === Helper Functions ===
 def mjpeg_stream():
@@ -23,7 +52,9 @@ def mjpeg_stream():
     frame_interval = 1.0 / float(target_fps)
     while True:
         start = time.time()
-        frame = picam2.capture_array()
+        frame = capture_camera_frame()
+        if frame is None:
+            break
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
         if not ret:
@@ -182,13 +213,15 @@ def health():
 def get_status():
     return StatusResponse(
         mode="SENTRY",
-        camera_active=True,
+        camera_active=camera_available(),
         ai_loaded=True,
         stream_idle_seconds=0
     )
 
 @router.get("/stream")
 def video_stream():
+    if not camera_available():
+        raise HTTPException(status_code=503, detail="Camera not available")
     return StreamingResponse(mjpeg_stream(), media_type='multipart/x-mixed-replace; boundary=frame')
 
 @router.post("/control/activate", response_model=ControlResponse)
@@ -233,9 +266,9 @@ def manual_mic_alert(req: ManualMicAlertRequest = Body(...)):
     frame = None
     image_data = None
     try:
-        if getattr(picam2, "started", None) is False:
-            picam2.start()
-        frame = picam2.capture_array()
+        frame = capture_camera_frame()
+        if frame is None:
+            raise RuntimeError("Camera unavailable")
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         ret, buffer = cv2.imencode('.jpg', frame)
         if ret:
@@ -257,15 +290,32 @@ def manual_mic_alert(req: ManualMicAlertRequest = Body(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    stream_url = stream_service.get_preferred_stream_url()
+
+    if frame is None:
+        return {
+            "success": True,
+            "message": "Manual mic alert sent; camera unavailable for AI verification",
+            "aiVerified": False,
+            "verification": {
+                "framesSampled": 0,
+                "positiveFrames": 0,
+                "minPositiveFrames": 0,
+                "class": None,
+                "confidence": 0.0,
+                "bbox": None
+            },
+            "streamUrl": stream_url
+        }
+
     # 2) Wake camera and verify with AI
     if frame is None:
         try:
-            if getattr(picam2, "started", None) is False:
-                picam2.start()
+            if ensure_camera_started():
+                frame = camera_singleton.picam2.capture_array()
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         except Exception:
             pass
-        frame = picam2.capture_array()
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
     # 2) Verify across multiple frames (video-like window) instead of one frame.
     verify_frames = max(1, int(config.AI_VERIFY_FRAMES))
@@ -276,7 +326,10 @@ def manual_mic_alert(req: ManualMicAlertRequest = Body(...)):
 
     for idx in range(verify_frames):
         if idx > 0:
-            frame = picam2.capture_array()
+            frame = capture_camera_frame()
+            if frame is None:
+                logger.get_logger().warning("Manual mic alert: camera became unavailable during verification.")
+                break
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         result = vision.detect_detailed(frame)
         detections = result.get("detections", [])
@@ -298,9 +351,6 @@ def manual_mic_alert(req: ManualMicAlertRequest = Body(...)):
                 best_result = result
 
         time.sleep(0.08)
-
-    # Use global preferred stream URL resolver (LAN when TUNNEL_PROVIDER=none)
-    stream_url = stream_service.get_preferred_stream_url()
 
     # 3) If AI confirms threat, send a second confirmation alert
     ai_verified = positive_frames >= min_positive_frames and best_result.get("class") in VALID_THREAT_TYPES
@@ -337,8 +387,11 @@ def manual_mic_alert(req: ManualMicAlertRequest = Body(...)):
         if image_data is None:
             # Fallback: capture a fresh frame and attach it rather than sending no image.
             try:
-                fallback = picam2.capture_array()
-                fallback = cv2.cvtColor(fallback, cv2.COLOR_RGB2BGR)
+                fallback = capture_camera_frame()
+                if fallback is not None:
+                    fallback = cv2.cvtColor(fallback, cv2.COLOR_RGB2BGR)
+                else:
+                    raise RuntimeError("Camera unavailable")
                 ret, buffer = cv2.imencode('.jpg', fallback)
                 if ret:
                     image_data = base64.b64encode(buffer.tobytes()).decode('utf-8')
@@ -375,7 +428,8 @@ def manual_mic_alert(req: ManualMicAlertRequest = Body(...)):
 
     # 4) If not confirmed, close camera and do not send second alert
     try:
-        picam2.stop()
+        if camera_singleton.picam2 is not None:
+            camera_singleton.picam2.stop()
     except Exception as e:
         logger.get_logger().error(f"Manual mic alert: failed to stop camera after false verification: {e}")
 
