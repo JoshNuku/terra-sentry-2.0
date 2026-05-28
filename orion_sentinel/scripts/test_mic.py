@@ -31,6 +31,7 @@ def _resample_linear(x: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
 
 def monitor_levels(seconds: float):
     print(f"Monitoring ADC level for {seconds:.1f}s (tap/speak near mic)...")
+    print("(normalized RMS matches the audio detector threshold)\n")
     start = time.time()
     end = start + seconds
     window = []
@@ -45,11 +46,18 @@ def monitor_levels(seconds: float):
         now = time.time()
         if now - last_print >= 1.0 and window:
             arr = np.array(window, dtype=np.float32)
+            # Normalize to [-1, 1] just like audio_loop does
+            normalized = (arr - 32768.0) / 32768.0
+            # Compute RMS on normalized audio (what the detector uses)
+            rms_normalized = float(np.sqrt(np.mean(normalized ** 2)))
+            # Also show raw RMS for reference
             centered = arr - np.mean(arr)
-            rms = float(np.sqrt(np.mean(centered ** 2)))
+            rms_raw = float(np.sqrt(np.mean(centered ** 2)))
             peak = float(np.max(np.abs(centered)))
-            bar = "#" * min(50, int(rms / 8))
-            print(f"rms={rms:8.2f} peak={peak:8.2f} |{bar}")
+            # Bar is now scaled to match thresholds (0.30 is current trigger)
+            bar = "#" * min(50, int(rms_normalized * 100))
+            print(f"norm_rms={rms_normalized:.4f} raw_rms={rms_raw:8.2f} peak={peak:8.2f} |{bar}")
+            print(f"  (trigger threshold is 0.30, current value is {rms_normalized:.4f})")
             window = []
             last_print = now
 

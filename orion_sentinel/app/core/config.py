@@ -20,10 +20,10 @@ ALLOWED_CLASSES = ["excavator", "bus", "car", "motorcycle", "truck", "person"]
 # Audio
 SAMPLE_RATE = int(os.getenv("AUDIO_SAMPLE_RATE", "16000"))
 BUFFER_SECONDS = float(os.getenv("AUDIO_BUFFER_SECONDS", "1.0"))
-MAX9814_ADC_CHANNEL = int(os.getenv("MAX9814_ADC_CHANNEL", "1"))  # A1
+MAX9814_ADC_CHANNEL = int(os.getenv("MAX9814_ADC_CHANNEL", "0"))  # A1
 
 # Vision
-YOLO_INPUT_SIZE = int(os.getenv("YOLO_INPUT_SIZE", "320"))
+YOLO_INPUT_SIZE = int(os.getenv("YOLO_INPUT_SIZE", "640"))
 YOLO_CLASSES = ["excavator", "bus", "car", "motorcycle", "truck", "person"]
 
 # Dynamic Model Path selection (prefer best.onnx if present)

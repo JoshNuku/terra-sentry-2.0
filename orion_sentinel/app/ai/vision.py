@@ -2,6 +2,7 @@
 import numpy as np
 import tflite_runtime.interpreter as tflite
 import cv2
+import onnxruntime as ort
 from app.core import config, logger
 
 log = logger.get_logger()
@@ -22,20 +23,18 @@ _input_details = None
 _output_details = None
 _input_width = None
 _input_height = None
-_net = None
+_ort_session = None
 _model_type = None  # "onnx" or "tflite"
 
 def _load_model():
-    global _interpreter, _input_details, _output_details, _input_width, _input_height, _net, _model_type
+    global _interpreter, _input_details, _output_details, _input_width, _input_height, _ort_session, _model_type
     if _model_type is not None:
         return
 
     ext = os.path.splitext(MODEL_PATH)[1].lower()
     if ext == ".onnx":
-        log.info(f"[VISION] Loading ONNX model from {MODEL_PATH} via OpenCV DNN...")
-        _net = cv2.dnn.readNet(MODEL_PATH)
-        _net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-        _net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+        log.info(f"[VISION] Loading ONNX model from {MODEL_PATH} via ONNX Runtime...")
+        _ort_session = ort.InferenceSession(MODEL_PATH, providers=['CPUExecutionProvider'])
         _model_type = "onnx"
         _input_height = INPUT_SIZE
         _input_width = INPUT_SIZE
@@ -65,19 +64,15 @@ def detect_detailed(frame):
         input_w = _input_width or INPUT_SIZE
         input_h = _input_height or INPUT_SIZE
 
+        if frame is not None and frame.ndim == 3 and frame.shape[2] == 4:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+
         if _model_type == "onnx":
-            # ONNX inference using OpenCV DNN
+            # ONNX inference using ONNX Runtime
             blob = cv2.dnn.blobFromImage(frame, 1/255.0, (input_w, input_h), swapRB=True, crop=False)
-            _net.setInput(blob)
-            outputs = _net.forward()
-            
-            # outputs shape is typically [1, 25200, 85] or [1, 85, 25200]
-            if outputs.shape[1] == 85 and outputs.shape[2] == 25200:
-                outputs = np.transpose(outputs, (0, 2, 1))
-            elif outputs.ndim == 3 and outputs.shape[2] != len(COCO_CLASSES) + 5 and outputs.shape[1] == len(COCO_CLASSES) + 5:
-                outputs = np.transpose(outputs, (0, 2, 1))
-            
-            detections = outputs[0]
+            input_name = _ort_session.get_inputs()[0].name
+            outputs = _ort_session.run(None, {input_name: blob})
+            detections = outputs[0][0]
         else:
             # TFLite inference
             frame_resized = cv2.resize(frame, (input_w, input_h))

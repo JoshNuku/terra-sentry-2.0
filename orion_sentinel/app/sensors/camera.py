@@ -1,4 +1,3 @@
-from picamera2 import Picamera2
 import numpy as np
 from app.core import logger, config
 import time
