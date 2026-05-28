@@ -217,6 +217,20 @@ def request_stream():
 def stream_keepalive():
     return {"ok": True}
 
+@router.post("/control/restart")
+@router.post("/api/sentinels/{deviceId}/restart")
+def control_restart(deviceId: Optional[str] = None):
+    import threading
+    import os
+    
+    def delayed_exit():
+        time.sleep(1.0)
+        logger.get_logger().info("Restart requested: Exiting process now...")
+        os._exit(0)
+        
+    threading.Thread(target=delayed_exit).start()
+    return {"success": True, "message": "Service restart initiated successfully"}
+
 # === Alert Endpoints ===
 @router.post("/api/alerts/manual-mic")
 def manual_mic_alert(req: ManualMicAlertRequest = Body(...)):
