@@ -536,3 +536,101 @@ def dashboard_keepalive(deviceId: str, request: Request):
 def dashboard_pi_status(deviceId: str):
     return get_status()
 
+
+@router.post("/control/verify_vision")
+def verify_vision():
+    log = logger.get_logger()
+    log.info("[VISION] Manual vision AI verification requested by operator.")
+    
+    # 1) Capture frame
+    frame = capture_camera_frame()
+    if frame is None:
+        log.error("[VISION] Failed to capture camera frame for manual verification.")
+        return {
+            "success": False,
+            "detected": False,
+            "message": "Camera is currently busy or unavailable. Please try again."
+        }
+        
+    try:
+        # Convert RGB to BGR for OpenCV / YOLO
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        
+        # 2) Run object detection
+        result = vision.detect_detailed(frame)
+        detected = result.get("detected", False)
+        threat_class = result.get("class")
+        confidence = float(result.get("confidence", 0.0))
+        
+        if detected and threat_class in VALID_THREAT_TYPES:
+            log.info(f"[VISION] AI detected threat: {threat_class} ({confidence:.2f})")
+            
+            # Annotate bbox and label
+            annotated_frame = result.get("annotated_frame")
+            if annotated_frame is None:
+                annotated_frame = frame.copy()
+                
+            bbox = result.get("bbox")
+            if bbox:
+                x1, y1, x2, y2 = [int(v) for v in bbox]
+                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(
+                    annotated_frame,
+                    f"{threat_class} {confidence:.2f}",
+                    (x1, max(20, y1 - 8)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 0),
+                    2
+                )
+                
+            # Encode frame to base64 JPEG
+            ret, buffer = cv2.imencode('.jpg', annotated_frame)
+            image_data = base64.b64encode(buffer.tobytes()).decode('utf-8') if ret else None
+            
+            # Send alert to backend — propagate failure so operator knows if it was actually saved
+            location = {"lat": config.DEFAULT_LAT, "lng": config.DEFAULT_LNG}
+            try:
+                alert_service.send_alert(
+                    sentinel_id=config.DEVICE_ID,
+                    threat_type=threat_class,
+                    confidence=confidence,
+                    location=location,
+                    image_data=image_data,
+                    trigger_type="ai",
+                    triggered_sensors=["camera"]
+                )
+            except Exception as alert_err:
+                log.error(f"[VISION] Threat detected but alert dispatch failed: {alert_err}")
+                return {
+                    "success": True,
+                    "detected": True,
+                    "class": threat_class,
+                    "confidence": confidence,
+                    "message": f"AI detected {threat_class} ({int(confidence * 100)}% confidence) but alert could not be sent to backend. Check connectivity."
+                }
+            
+            return {
+                "success": True,
+                "detected": True,
+                "class": threat_class,
+                "confidence": confidence,
+                "message": f"AI verified threat: {threat_class} ({int(confidence * 100)}% confidence). Alert generated!"
+            }
+        else:
+            log.info("[VISION] AI verification complete. No threats detected in the frame.")
+            return {
+                "success": True,
+                "detected": False,
+                "message": "AI analysis complete: No threats detected in the frame. System state clear."
+            }
+            
+    except Exception as e:
+        log.error(f"[VISION] Manual AI verification failed: {e}")
+        return {
+            "success": False,
+            "detected": False,
+            "message": f"AI analysis failed: {str(e)}"
+        }
+
+
