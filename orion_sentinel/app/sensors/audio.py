@@ -42,7 +42,7 @@ def audio_loop():
             for _ in range(buffer_size):
                 val = adc.read_channel(CHANNEL)
                 if val is None:
-                    val = 0
+                    val = 32768
                 audio_buffer.append(val)
                 time.sleep(sleep_interval)
             capture_elapsed = max(1e-6, time.time() - capture_start)
@@ -54,7 +54,7 @@ def audio_loop():
             label, confidence = audio_model.classify(audio_np, sample_rate=recent_effective_hz)
             now = time.time()
             windows_processed += 1
-            if label and confidence > 0.70 and (now - last_trigger) > min_trigger_interval:
+            if label and confidence >= 3.0 and (now - last_trigger) > min_trigger_interval:
                 event = {
                     "type": "AUDIO_TRIGGER",
                     "label": label,
